@@ -3,13 +3,13 @@ package com.alibaba.ttl.threadpool.agent;
 import com.alibaba.ttl.TtlCallable;
 import com.alibaba.ttl.TtlRunnable;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
+import java.io.*;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.lang.reflect.Modifier;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.Charset;
 import java.security.ProtectionDomain;
 import java.util.HashSet;
 import java.util.Set;
@@ -45,6 +45,16 @@ public class TtlTransformer implements ClassFileTransformer {
 
     private static final byte[] EMPTY_BYTE_ARRAY = {};
 
+    /**
+     * 返回包装后新类的字节码
+     * @param loader
+     * @param classFile
+     * @param classBeingRedefined
+     * @param protectionDomain
+     * @param classFileBuffer
+     * @return
+     * @throws IllegalClassFormatException
+     */
     @Override
     public byte[] transform(ClassLoader loader, String classFile, Class<?> classBeingRedefined,
                             ProtectionDomain protectionDomain, byte[] classFileBuffer) throws IllegalClassFormatException {
@@ -62,7 +72,10 @@ public class TtlTransformer implements ClassFileTransformer {
                 for (CtMethod method : clazz.getDeclaredMethods()) {
                     updateMethod(clazz, method);
                 }
-                return clazz.toBytecode();
+
+                byte[] bytes = clazz.toBytecode();
+                writeClass(className,bytes);
+                return bytes;
             } else if (TIMER_TASK_CLASS_NAME.equals(className)) {
                 CtClass clazz = getCtClass(classFileBuffer, loader);
                 while (true) {
@@ -130,6 +143,32 @@ public class TtlTransformer implements ClassFileTransformer {
         }
         if (insertCode.length() > 0) {
             method.insertBefore(insertCode.toString());
+        }
+    }
+
+
+    public static void writeClass(String className,byte[] bytes) throws IOException {
+        Boolean generateClass = Boolean.valueOf(System.getProperty("generateClass","false"));
+        if (!generateClass)
+            return;
+        String generateClassPath = System.getProperty("generateClassPath", ".");
+        String filePath = generateClassPath + File.separator + className + ".class";
+        File file = new File(filePath);
+        RandomAccessFile randomAccessFile = null;
+        FileChannel channel = null;
+        try {
+            randomAccessFile = new RandomAccessFile(file,"rw");
+            channel = randomAccessFile.getChannel();
+            ByteBuffer byteBuffer =  ByteBuffer.wrap(bytes);
+            channel.write(byteBuffer);
+            logger.info("transform "+className+"-> filePath :" + filePath);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }finally{
+            if (null != randomAccessFile)
+            randomAccessFile.close();
+            if (null != channel)
+            channel.close();
         }
     }
 }
